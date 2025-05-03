@@ -56,8 +56,14 @@ type Action struct {
 	// src is the Pod used to execute the test from.
 	src *Pod
 
+	// srcControl is the Pod used to execute the test from.
+	srcControl *Pod
+
 	// Dst is the peer used as the destination for the action.
 	dst TestPeer
+
+	// dstControl is the Pod used to execute the test from.
+	dstControl *Pod
 
 	// IP family used in this Action
 	ipFam features.IPFamily

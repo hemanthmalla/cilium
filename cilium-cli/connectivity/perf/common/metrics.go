@@ -64,6 +64,46 @@ func (metric *TransactionRateMetric) toPerfData(labels map[string]string, prefix
 	}
 }
 
+// TransactionRateMetric captures transaction rate metric of network performance test
+type RetransmitSegemntsMetric struct {
+	RetransmitSegemnts float64 `json:"RetransmitSegemnts"` // Retransmit Segments
+}
+
+// ToPerfData export TransactionRateMetric in a format compatible with perfdash scheme
+func (metric *RetransmitSegemntsMetric) toPerfData(labels map[string]string, prefix string) dataItem {
+	resLabels := map[string]string{
+		"metric": "RetransmitSegemnts",
+	}
+	maps.Copy(resLabels, labels)
+	return dataItem{
+		Data: map[string]float64{
+			prefix + "_cnt": float64(metric.RetransmitSegemnts),
+		},
+		Unit:   "cnt",
+		Labels: resLabels,
+	}
+}
+
+// OutOfBufferErrorsMetric captures transaction rate metric of network performance test
+type OutOfBufferErrorsMetric struct {
+	OutOfBufferErrors float64 `json:"OutOfBufferErrors"` // Retransmit Segments
+}
+
+// ToPerfData export OutOfBufferErrorsMetric in a format compatible with perfdash scheme
+func (metric *OutOfBufferErrorsMetric) toPerfData(labels map[string]string, prefix string) dataItem {
+	resLabels := map[string]string{
+		"metric": "OutOfBufferErrors",
+	}
+	maps.Copy(resLabels, labels)
+	return dataItem{
+		Data: map[string]float64{
+			prefix + "_cnt": float64(metric.OutOfBufferErrors),
+		},
+		Unit:   "cnt",
+		Labels: resLabels,
+	}
+}
+
 // ThroughputMetric captures throughput metric of network performance test
 type ThroughputMetric struct {
 	Throughput float64 `json:"Throughput"` // Throughput in bytes/s
@@ -86,10 +126,12 @@ func (metric *ThroughputMetric) toPerfData(labels map[string]string, prefix stri
 
 // PerfResult stores information about single network performance test results
 type PerfResult struct {
-	Timestamp             time.Time
-	Latency               *LatencyMetric
-	TransactionRateMetric *TransactionRateMetric
-	ThroughputMetric      *ThroughputMetric
+	Timestamp                time.Time
+	Latency                  *LatencyMetric
+	TransactionRateMetric    *TransactionRateMetric
+	ThroughputMetric         *ThroughputMetric
+	RetransmitSegemntsMetric *RetransmitSegemntsMetric
+	OutOfBufferErrorsMetric  *OutOfBufferErrorsMetric
 }
 
 // PerfTests stores metadata information about performed test
@@ -103,6 +145,7 @@ type PerfTests struct {
 	Duration time.Duration
 	Streams  uint
 	NetQos   bool
+	Experiment string
 }
 
 // PerfSummary stores combined metadata information and results of test
@@ -177,6 +220,22 @@ func ExportPerfSummaries(summaries []PerfSummary, reportDir string) error {
 				data[identifier+"th"] = res
 			} else {
 				maps.Copy(data[identifier+"th"].Data, res.Data)
+			}
+		}
+		if summary.Result.RetransmitSegemntsMetric != nil {
+			res := summary.Result.RetransmitSegemntsMetric.toPerfData(labels, summary.PerfTest.Test+"_"+summary.PerfTest.Scenario)
+			if _, ok := data[identifier+"rt"]; !ok {
+				data[identifier+"th"] = res
+			} else {
+				maps.Copy(data[identifier+"rt"].Data, res.Data)
+			}
+		}
+		if summary.Result.OutOfBufferErrorsMetric != nil {
+			res := summary.Result.OutOfBufferErrorsMetric.toPerfData(labels, summary.PerfTest.Test+"_"+summary.PerfTest.Scenario)
+			if _, ok := data[identifier+"ob"]; !ok {
+				data[identifier+"ob"] = res
+			} else {
+				maps.Copy(data[identifier+"ob"].Data, res.Data)
 			}
 		}
 	}

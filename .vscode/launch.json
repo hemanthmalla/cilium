@@ -12,6 +12,14 @@
 			"program": "${relativeFileDirname}",
 		},
 		{
+			"name": "Launch cilium cli perf",
+			"type": "go",
+			"request": "launch",
+			"mode": "auto",
+			"program": "/home/ubuntu/go/src/github.com/cilium/cilium/cilium-cli/cmd/cilium/main.go",
+			"args": ["connectivity", "perf", "--node-selector-client", "role=client", "--node-selector-server", "role=server", "--rr=true", "--same-node=false"],
+		},
+		{
 			"name": "Launch controlplane test",
 			"type": "go",
 			"request": "launch",

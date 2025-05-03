@@ -67,24 +67,28 @@ type ConnectivityTest struct {
 	// Clients for source and destination clusters.
 	clients *deploymentClients
 
-	ciliumPods           map[string]Pod
-	echoPods             map[string]Pod
-	echoExternalPods     map[string]Pod
-	clientPods           map[string]Pod
-	clientCPPods         map[string]Pod
-	perfClientPods       []Pod
-	perfServerPod        []Pod
-	perfProfilingPods    map[string]Pod
-	PerfResults          []common.PerfSummary
-	echoServices         map[string]Service
-	echoExternalServices map[string]Service
-	ingressService       map[string]Service
-	k8sService           Service
-	lrpClientPods        map[string]Pod
-	lrpBackendPods       map[string]Pod
-	frrPods              []Pod
-	socatServerPods      []Pod
-	socatClientPods      []Pod
+	ciliumPods            map[string]Pod
+	echoPods              map[string]Pod
+	echoExternalPods      map[string]Pod
+	clientPods            map[string]Pod
+	clientCPPods          map[string]Pod
+	perfClientPods        []Pod
+	perfServerPod         []Pod
+	perfProfilingPods     map[string]Pod
+	perfServerHost        string
+	perfClientHost        string
+	perfServerCiliumAgent Pod
+	perfClientCiliumAgent Pod
+	PerfResults           []common.PerfSummary
+	echoServices          map[string]Service
+	echoExternalServices  map[string]Service
+	ingressService        map[string]Service
+	k8sService            Service
+	lrpClientPods         map[string]Pod
+	lrpBackendPods        map[string]Pod
+	frrPods               []Pod
+	socatServerPods       []Pod
+	socatClientPods       []Pod
 
 	hostNetNSPodsByNode      map[string]Pod
 	secondaryNetworkNodeIPv4 map[string]string // node name => secondary ip
@@ -132,6 +136,10 @@ func netIPToCIDRs(netIPs []netip.Addr) (netCIDRs []netip.Prefix) {
 // debug returns the value of the user-provided debug flag.
 func (ct *ConnectivityTest) debug() bool {
 	return ct.params.Debug
+}
+
+func (ct *ConnectivityTest) PerfServerCiliumAgentPod() Pod {
+	return ct.perfServerCiliumAgent
 }
 
 // timestamp returns the value of the user-provided timestamp flag.
@@ -399,6 +407,10 @@ func (ct *ConnectivityTest) setupAndValidatePerf(ctx context.Context, _ SetupHoo
 		return err
 	}
 
+	if err := ct.initCiliumPods(ctx); err != nil {
+		return err
+	}
+
 	if err := ct.validateDeploymentPerf(ctx); err != nil {
 		return err
 	}
@@ -561,9 +573,9 @@ func (ct *ConnectivityTest) report() error {
 
 	if ct.params.Perf && !ct.params.PerfParameters.NetQos {
 		ct.Header(fmt.Sprintf("🔥 Network Performance Test Summary [%s]:", ct.params.TestNamespace))
-		ct.Logf("%s", strings.Repeat("-", 200))
-		ct.Logf("📋 %-15s | %-10s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s", "Scenario", "Node", "Test", "Duration", "Min", "Mean", "Max", "P50", "P90", "P99", "Transaction rate OP/s")
-		ct.Logf("%s", strings.Repeat("-", 200))
+		ct.Logf("%s", strings.Repeat("-", 230))
+		ct.Logf("📋 %-15s | %-15s | %-10s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s", "Scenario", "Experiment", "Node", "Test", "Duration", "Min", "Mean", "Max", "P50", "P90", "P99", "TPS", "Retrans Segs", "Out of Buffer Errs")
+		ct.Logf("%s", strings.Repeat("-", 230))
 		nodeString := func(sameNode bool) string {
 			if sameNode {
 				return "same-node"
@@ -572,8 +584,9 @@ func (ct *ConnectivityTest) report() error {
 		}
 		for _, result := range ct.PerfResults {
 			if result.Result.Latency != nil && result.Result.TransactionRateMetric != nil {
-				ct.Logf("📋 %-15s | %-10s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-12.2f",
+				ct.Logf("📋 %-15s | %-15s | %-10s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-12.2f | %-14.2f | %-12.2f",
 					result.PerfTest.Scenario,
+					result.PerfTest.Experiment,
 					nodeString(result.PerfTest.SameNode),
 					result.PerfTest.Test,
 					result.PerfTest.Duration,
@@ -584,25 +597,30 @@ func (ct *ConnectivityTest) report() error {
 					result.Result.Latency.Perc90,
 					result.Result.Latency.Perc99,
 					result.Result.TransactionRateMetric.TransactionRate,
+					result.Result.RetransmitSegemntsMetric.RetransmitSegemnts,
+					result.Result.OutOfBufferErrorsMetric.OutOfBufferErrors,
 				)
 			}
 		}
-		ct.Logf("%s", strings.Repeat("-", 200))
-		ct.Logf("%s", strings.Repeat("-", 88))
-		ct.Logf("📋 %-15s | %-10s | %-18s | %-15s | %-15s ", "Scenario", "Node", "Test", "Duration", "Throughput Mb/s")
-		ct.Logf("%s", strings.Repeat("-", 88))
+		ct.Logf("%s", strings.Repeat("-", 230))
+		ct.Logf("%s", strings.Repeat("-", 130))
+		ct.Logf("📋 %-15s | %-15s | %-10s | %-18s | %-15s | %-15s | %-15s | %-15s ", "Scenario", "Experiment", "Node", "Test", "Duration", "Throughput Mb/s", "Retrans Segs", "Out of Buffer Errs")
+		ct.Logf("%s", strings.Repeat("-", 130))
 		for _, result := range ct.PerfResults {
 			if result.Result.ThroughputMetric != nil {
-				ct.Logf("📋 %-15s | %-10s | %-18s | %-15s | %-12.2f ",
+				ct.Logf("📋 %-15s | %-15s | %-10s | %-18s | %-15s | %-15.2f | %-15.2f | %-12.2f ",
 					result.PerfTest.Scenario,
+					result.PerfTest.Experiment,
 					nodeString(result.PerfTest.SameNode),
 					result.PerfTest.Test,
 					result.PerfTest.Duration,
 					result.Result.ThroughputMetric.Throughput/1000000,
+					result.Result.RetransmitSegemntsMetric.RetransmitSegemnts,
+					result.Result.OutOfBufferErrorsMetric.OutOfBufferErrors,
 				)
 			}
 		}
-		ct.Logf("%s", strings.Repeat("-", 88))
+		ct.Logf("%s", strings.Repeat("-", 130))
 		if ct.Params().PerfParameters.ReportDir != "" {
 			common.ExportPerfSummaries(ct.PerfResults, ct.Params().PerfParameters.ReportDir)
 		}
@@ -907,6 +925,13 @@ func (ct *ConnectivityTest) initCiliumPods(ctx context.Context) error {
 
 	return nil
 }
+
+// // initPerfSrcDstCiliumPods initializes the Cilium agent pod information from src and dst pods
+// func (ct *ConnectivityTest) initPerfSrcDstCiliumPods(ctx context.Context) error {
+// 	clientNode := ct.clientPods
+
+// 	return nil
+// }
 
 func (ct *ConnectivityTest) getNodes(ctx context.Context) error {
 	ct.nodes = make(map[string]*corev1.Node)

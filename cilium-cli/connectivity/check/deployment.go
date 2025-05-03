@@ -2064,11 +2064,13 @@ func (ct *ConnectivityTest) validateDeploymentPerf(ctx context.Context) error {
 				K8sClient: ct.client,
 				Pod:       perfPod.DeepCopy(),
 			})
+			ct.perfServerHost = perfPod.Spec.NodeName
 		case perfPodRoleClient:
 			ct.perfClientPods = append(ct.perfClientPods, Pod{
 				K8sClient: ct.client,
 				Pod:       perfPod.DeepCopy(),
 			})
+			ct.perfClientHost = perfPod.Spec.NodeName
 		case perfPodRoleProfiling:
 			name := perfPod.GetLabels()["name"]
 			ct.perfProfilingPods[name] = Pod{
@@ -2077,6 +2079,15 @@ func (ct *ConnectivityTest) validateDeploymentPerf(ctx context.Context) error {
 			}
 		default:
 			ct.Warnf("Found perf pod %q with unknown a role %q", perfPod.GetName(), role)
+		}
+	}
+
+	for _, cp := range ct.ciliumPods {
+		switch cp.Pod.Spec.NodeName {
+		case ct.perfClientHost:
+			ct.perfClientCiliumAgent = cp
+		case ct.perfServerHost:
+			ct.perfServerCiliumAgent = cp
 		}
 	}
 

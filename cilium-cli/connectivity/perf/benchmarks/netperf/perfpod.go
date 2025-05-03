@@ -32,7 +32,8 @@ func Netperf(n string) check.Scenario {
 type netPerf struct {
 	check.ScenarioBase
 
-	name string
+	name        string
+	experiments []perfExperiment
 }
 
 func (s *netPerf) Name() string {
@@ -42,13 +43,32 @@ func (s *netPerf) Name() string {
 	return fmt.Sprintf("%s:%s", netperfToolName, s.name)
 }
 
-func (s *netPerf) Run(ctx context.Context, t *check.Test) {
+type nodeMetrics struct {
+	fetchCmd  string
+	metricVal int
+}
+
+type perfNodeMetrics struct {
+	outOfBufferErrors nodeMetrics
+	retransSegements  nodeMetrics
+}
+
+type perfExperiment struct {
+	name                string
+	prepSettingsCmd     string
+	validateSettingsCmd string
+	beforeMetrics       perfNodeMetrics
+	afterMetrics        perfNodeMetrics
+}
+
+func (s *netPerf) RunPerfTest(ctx context.Context, t *check.Test, exp *perfExperiment, ac action) {
+	// exp.beforeMetrics.outOfBufferErrors.metricVal = getIntMetricFromCmdOutput(ctx, ac, exp.beforeMetrics.outOfBufferErrors.fetchCmd)
+	// exp.beforeMetrics.retransSegements.metricVal = getIntMetricFromCmdOutput(ctx, ac, exp.beforeMetrics.retransSegements.fetchCmd)
 	perfParameters := t.Context().Params().PerfParameters
 
 	profilingPods := t.Context().PerfProfilingPods()
 	serverProfiler := profiler.New(profilingPods[check.PerfServerProfilingDeploymentName], perfParameters)
 	clientProfiler := profiler.New(profilingPods[check.PerfClientProfilingAcrossDeploymentName], perfParameters)
-
 	tests := []string{}
 
 	if perfParameters.Throughput {
@@ -128,15 +148,16 @@ func (s *netPerf) Run(ctx context.Context, t *check.Test) {
 					action.CollectFlows = false
 					action.Run(func(a *check.Action) {
 						k := common.PerfTests{
-							Test:     test,
-							Tool:     netperfToolName,
-							SameNode: sameNode,
-							Sample:   sample,
-							Duration: perfParameters.Duration,
-							Streams:  perfParameters.Streams,
-							Scenario: scenarioName,
-							MsgSize:  perfParameters.MessageSize,
-							NetQos:   false,
+							Test:       test,
+							Tool:       netperfToolName,
+							SameNode:   sameNode,
+							Sample:     sample,
+							Duration:   perfParameters.Duration,
+							Streams:    perfParameters.Streams,
+							Scenario:   scenarioName,
+							MsgSize:    perfParameters.MessageSize,
+							NetQos:     false,
+							Experiment: exp.name,
 						}
 
 						var clientProfile *profiler.Profile
@@ -145,7 +166,7 @@ func (s *netPerf) Run(ctx context.Context, t *check.Test) {
 							clientProfile = clientProfiler.Run(ctx, a)
 						}
 
-						perfResult := NetperfCmd(ctx, server.Pod.Status.PodIP, k, a)
+						perfResult := NetperfCmd(ctx, server.Pod.Status.PodIP, k, a, ac, exp)
 						t.Context().PerfResults = append(t.Context().PerfResults, common.PerfSummary{PerfTest: k, Result: perfResult})
 
 						if err := serverProfile.Save(testName+"_server.perf", a); err != nil {
@@ -162,6 +183,119 @@ func (s *netPerf) Run(ctx context.Context, t *check.Test) {
 			}
 		}
 	}
+}
+
+func getIntMetricFromCmdOutput(ctx context.Context, a action, cmd string) int {
+	exec := []string{"bash", "-c", cmd}
+	a.ExecInPod(ctx, exec)
+	output := strings.TrimSpace(a.CmdOutput())
+	value, err := strconv.Atoi(output)
+	if err != nil {
+		a.Fatalf("Failed to convert output to int: %v", err)
+	}
+	return value
+}
+
+func (s *netPerf) Run(ctx context.Context, t *check.Test) {
+	validateSettingsCmd := "sysctl net.ipv4.tcp_rmem net.core.netdev_budget_usecs net.core.netdev_budget && ethtool --json -g enP35569s1 | jq .[0].rx && ethtool -S enP35569s1 | grep out_of_buffer && netstat -s | grep -i retrans && ethtool -k enP35569s1 | grep generic-receive-offload && ethtool -c enP35569s1 | grep -i adaptive"
+	outOfBufferErrorsCmd := "ethtool -S enP35569s1 | grep out_of_buffer | awk '{print $2}'"
+	retransSegementsCmd := "netstat -s | grep -i retransmitted | awk '{print $1}'"
+	experiments := []perfExperiment{
+		{
+			name:                "1K|IM-ON|GRO-ON|" + strconv.Itoa(t.Context().Params().PerfParameters.MessageSize),
+			prepSettingsCmd:     "ethtool -G enP35569s1 rx 1024 && ethtool -K enP35569s1 gro on && ethtool -C enP35569s1 adaptive-rx on adaptive-tx on && echo done",
+			validateSettingsCmd: validateSettingsCmd,
+			beforeMetrics: perfNodeMetrics{
+				outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+				retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+			},
+			afterMetrics: perfNodeMetrics{
+				outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+				retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+			},
+		},
+		{
+			name:                "1K|IM-OFF|GRO-ON|" + strconv.Itoa(t.Context().Params().PerfParameters.MessageSize),
+			prepSettingsCmd:     "ethtool -G enP35569s1 rx 1024 && ethtool -K enP35569s1 gro on && ethtool -C enP35569s1 adaptive-rx off adaptive-tx off && echo done",
+			validateSettingsCmd: validateSettingsCmd,
+			beforeMetrics: perfNodeMetrics{
+				outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+				retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+			},
+			afterMetrics: perfNodeMetrics{
+				outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+				retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+			},
+		},
+		{
+			name:                "4K|IM-ON|GRO-ON|" + strconv.Itoa(t.Context().Params().PerfParameters.MessageSize),
+			prepSettingsCmd:     "ethtool -G enP35569s1 rx 4096 && ethtool -K enP35569s1 gro on && ethtool -C enP35569s1 adaptive-rx on adaptive-tx on && echo done",
+			validateSettingsCmd: validateSettingsCmd,
+			beforeMetrics: perfNodeMetrics{
+				outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+				retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+			},
+			afterMetrics: perfNodeMetrics{
+				outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+				retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+			},
+		},
+		{
+			name:                "4K|IM-OFF|GRO-ON|" + strconv.Itoa(t.Context().Params().PerfParameters.MessageSize),
+			prepSettingsCmd:     "ethtool -G enP35569s1 rx 4096 && ethtool -K enP35569s1 gro on && ethtool -C enP35569s1 adaptive-rx off adaptive-tx off && echo done",
+			validateSettingsCmd: validateSettingsCmd,
+			beforeMetrics: perfNodeMetrics{
+				outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+				retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+			},
+			afterMetrics: perfNodeMetrics{
+				outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+				retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+			},
+		},
+		{
+			name:                "2K|IM-OFF|GRO-ON|" + strconv.Itoa(t.Context().Params().PerfParameters.MessageSize),
+			prepSettingsCmd:     "ethtool -G enP35569s1 rx 2048 && ethtool -K enP35569s1 gro on && ethtool -C enP35569s1 adaptive-rx off adaptive-tx off && echo done",
+			validateSettingsCmd: validateSettingsCmd,
+			beforeMetrics: perfNodeMetrics{
+				outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+				retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+			},
+			afterMetrics: perfNodeMetrics{
+				outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+				retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+			},
+		},
+		{
+			name:                "2K|IM-ON|GRO-ON|" + strconv.Itoa(t.Context().Params().PerfParameters.MessageSize),
+			prepSettingsCmd:     "ethtool -G enP35569s1 rx 2048 && ethtool -K enP35569s1 gro on && ethtool -C enP35569s1 adaptive-rx on adaptive-tx on && echo done",
+			validateSettingsCmd: validateSettingsCmd,
+			beforeMetrics: perfNodeMetrics{
+				outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+				retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+			},
+			afterMetrics: perfNodeMetrics{
+				outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+				retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+			},
+		},
+	}
+	s.experiments = experiments
+
+	for _, exp := range experiments {
+		p := t.Context().PerfServerCiliumAgentPod()
+		a := t.NewAction(s, "setup_exp_"+exp.name, &p, nil, features.IPFamilyV4)
+
+		exec := []string{"bash", "-c", exp.prepSettingsCmd}
+		a.ExecInPod(ctx, exec)
+		a.Info(a.CmdOutput())
+		exec = []string{"bash", "-c", exp.validateSettingsCmd}
+		a.ExecInPod(ctx, exec)
+		a.Info(a.CmdOutput())
+
+		s.RunPerfTest(ctx, t, &exp, a)
+	}
+
 }
 
 func buildExecCommand(test string, sip string, duration time.Duration, args []string) []string {
@@ -237,7 +371,9 @@ type action interface {
 	Fatalf(format string, args ...any)
 }
 
-func NetperfCmd(ctx context.Context, sip string, perfTest common.PerfTests, a action) common.PerfResult {
+func NetperfCmd(ctx context.Context, sip string, perfTest common.PerfTests, a action, expAction action, exp *perfExperiment) common.PerfResult {
+	exp.beforeMetrics.outOfBufferErrors.metricVal = getIntMetricFromCmdOutput(ctx, expAction, exp.beforeMetrics.outOfBufferErrors.fetchCmd)
+	exp.beforeMetrics.retransSegements.metricVal = getIntMetricFromCmdOutput(ctx, expAction, exp.beforeMetrics.retransSegements.fetchCmd)
 	test := strings.TrimSuffix(perfTest.Test, "_MULTI")
 
 	streams := uint(1)
@@ -250,8 +386,10 @@ func NetperfCmd(ctx context.Context, sip string, perfTest common.PerfTests, a ac
 	}
 
 	args := []string{"-o", "MIN_LATENCY,MEAN_LATENCY,MAX_LATENCY,P50_LATENCY,P90_LATENCY,P99_LATENCY,TRANSACTION_RATE,THROUGHPUT,THROUGHPUT_UNITS"}
-	if test == "UDP_STREAM" || perfTest.NetQos {
-		args = append(args, "-m", fmt.Sprintf("%d", perfTest.MsgSize))
+	if test == "UDP_STREAM" || test == "TCP_STREAM" || test == "TCP_STREAM_MULTI" || perfTest.NetQos {
+		if perfTest.MsgSize != 0 {
+			args = append(args, "-m", fmt.Sprintf("%d", perfTest.MsgSize))
+		}
 	}
 	exec := buildExecCommand(test, sip, perfTest.Duration, args)
 
@@ -281,6 +419,14 @@ func NetperfCmd(ctx context.Context, sip string, perfTest common.PerfTests, a ac
 		parsed := parseNetperfResult(a, test, line)
 		res.ThroughputMetric.Throughput += parsed.ThroughputMetric.Throughput
 	}
+	exp.afterMetrics.outOfBufferErrors.metricVal = getIntMetricFromCmdOutput(ctx, expAction, exp.afterMetrics.outOfBufferErrors.fetchCmd)
+	exp.afterMetrics.retransSegements.metricVal = getIntMetricFromCmdOutput(ctx, expAction, exp.afterMetrics.retransSegements.fetchCmd)
 
+	res.OutOfBufferErrorsMetric = &common.OutOfBufferErrorsMetric{
+		OutOfBufferErrors: float64(exp.afterMetrics.outOfBufferErrors.metricVal - exp.beforeMetrics.outOfBufferErrors.metricVal),
+	}
+	res.RetransmitSegemntsMetric = &common.RetransmitSegemntsMetric{
+		RetransmitSegemnts: float64(exp.afterMetrics.retransSegements.metricVal - exp.beforeMetrics.retransSegements.metricVal),
+	}
 	return res
 }

@@ -71,7 +71,7 @@ func (s *netQos) Run(ctx context.Context, t *check.Test) {
 							MsgSize:  1500000,
 							NetQos:   true,
 						}
-						perfResult := NetperfCmd(ctx, server.Pod.Status.PodIP, k, a)
+						perfResult := NetperfCmd(ctx, server.Pod.Status.PodIP, k, a, a, &perfExperiment{})
 						s.Lock()
 						tputSum[c.Name()] += uint64(perfResult.ThroughputMetric.Throughput / 1000000)
 						s.Unlock()
