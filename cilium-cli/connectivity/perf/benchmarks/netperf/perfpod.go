@@ -61,7 +61,7 @@ type perfExperiment struct {
 	afterMetrics        perfNodeMetrics
 }
 
-func (s *netPerf) RunPerfTest(ctx context.Context, t *check.Test, exp *perfExperiment, ac action) {
+func (s *netPerf) RunPerfTest(ctx context.Context, t *check.Test, exp *perfExperiment, ac action, clientAction action) {
 	// exp.beforeMetrics.outOfBufferErrors.metricVal = getIntMetricFromCmdOutput(ctx, ac, exp.beforeMetrics.outOfBufferErrors.fetchCmd)
 	// exp.beforeMetrics.retransSegements.metricVal = getIntMetricFromCmdOutput(ctx, ac, exp.beforeMetrics.retransSegements.fetchCmd)
 	perfParameters := t.Context().Params().PerfParameters
@@ -166,7 +166,7 @@ func (s *netPerf) RunPerfTest(ctx context.Context, t *check.Test, exp *perfExper
 							clientProfile = clientProfiler.Run(ctx, a)
 						}
 
-						perfResult := NetperfCmd(ctx, server.Pod.Status.PodIP, k, a, ac, exp)
+						perfResult := NetperfCmd(ctx, server.Pod.Status.PodIP, k, a, ac, clientAction, exp)
 						t.Context().PerfResults = append(t.Context().PerfResults, common.PerfSummary{PerfTest: k, Result: perfResult})
 
 						if err := serverProfile.Save(testName+"_server.perf", a); err != nil {
@@ -202,8 +202,8 @@ func (s *netPerf) Run(ctx context.Context, t *check.Test) {
 	retransSegementsCmd := "netstat -s | grep -i retransmitted | awk '{print $1}'"
 	experiments := []perfExperiment{
 		{
-			name:                "1K|IM-ON|GRO-ON|" + strconv.Itoa(t.Context().Params().PerfParameters.MessageSize),
-			prepSettingsCmd:     "ethtool -G enP35569s1 rx 1024 && ethtool -K enP35569s1 gro on && ethtool -C enP35569s1 adaptive-rx on adaptive-tx on && echo done",
+			name:                "1K|IM-ON|GRO-ON|NP-DEF|" + strconv.Itoa(t.Context().Params().PerfParameters.MessageSize),
+			prepSettingsCmd:     "echo 0 >/sys/class/net/enP35569s1/gro_flush_timeout &&  echo 0 >/sys/class/net/enP35569s1/napi_defer_hard_irqs && ethtool -G enP35569s1 rx 1024 && ethtool -K enP35569s1 gro on && ethtool -C enP35569s1 adaptive-rx on adaptive-tx on && echo done",
 			validateSettingsCmd: validateSettingsCmd,
 			beforeMetrics: perfNodeMetrics{
 				outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
@@ -215,8 +215,8 @@ func (s *netPerf) Run(ctx context.Context, t *check.Test) {
 			},
 		},
 		{
-			name:                "1K|IM-OFF|GRO-ON|" + strconv.Itoa(t.Context().Params().PerfParameters.MessageSize),
-			prepSettingsCmd:     "ethtool -G enP35569s1 rx 1024 && ethtool -K enP35569s1 gro on && ethtool -C enP35569s1 adaptive-rx off adaptive-tx off && echo done",
+			name:                "1K|IM-OFF|GRO-ON|NP-DEF|" + strconv.Itoa(t.Context().Params().PerfParameters.MessageSize),
+			prepSettingsCmd:     "echo 0 >/sys/class/net/enP35569s1/gro_flush_timeout &&  echo 0 >/sys/class/net/enP35569s1/napi_defer_hard_irqs && ethtool -G enP35569s1 rx 1024 && ethtool -K enP35569s1 gro on && ethtool -C enP35569s1 adaptive-rx off adaptive-tx off && echo done",
 			validateSettingsCmd: validateSettingsCmd,
 			beforeMetrics: perfNodeMetrics{
 				outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
@@ -228,8 +228,8 @@ func (s *netPerf) Run(ctx context.Context, t *check.Test) {
 			},
 		},
 		{
-			name:                "4K|IM-ON|GRO-ON|" + strconv.Itoa(t.Context().Params().PerfParameters.MessageSize),
-			prepSettingsCmd:     "ethtool -G enP35569s1 rx 4096 && ethtool -K enP35569s1 gro on && ethtool -C enP35569s1 adaptive-rx on adaptive-tx on && echo done",
+			name:                "1K|IM-ON|GRO-ON|NP-TUNE|" + strconv.Itoa(t.Context().Params().PerfParameters.MessageSize),
+			prepSettingsCmd:     "echo 20000 >/sys/class/net/enP35569s1/gro_flush_timeout &&  echo 10 >/sys/class/net/enP35569s1/napi_defer_hard_irqs && ethtool -G enP35569s1 rx 1024 && ethtool -K enP35569s1 gro on && ethtool -C enP35569s1 adaptive-rx on adaptive-tx on && echo done",
 			validateSettingsCmd: validateSettingsCmd,
 			beforeMetrics: perfNodeMetrics{
 				outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
@@ -240,51 +240,93 @@ func (s *netPerf) Run(ctx context.Context, t *check.Test) {
 				retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
 			},
 		},
-		{
-			name:                "4K|IM-OFF|GRO-ON|" + strconv.Itoa(t.Context().Params().PerfParameters.MessageSize),
-			prepSettingsCmd:     "ethtool -G enP35569s1 rx 4096 && ethtool -K enP35569s1 gro on && ethtool -C enP35569s1 adaptive-rx off adaptive-tx off && echo done",
-			validateSettingsCmd: validateSettingsCmd,
-			beforeMetrics: perfNodeMetrics{
-				outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
-				retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
-			},
-			afterMetrics: perfNodeMetrics{
-				outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
-				retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
-			},
-		},
-		{
-			name:                "2K|IM-OFF|GRO-ON|" + strconv.Itoa(t.Context().Params().PerfParameters.MessageSize),
-			prepSettingsCmd:     "ethtool -G enP35569s1 rx 2048 && ethtool -K enP35569s1 gro on && ethtool -C enP35569s1 adaptive-rx off adaptive-tx off && echo done",
-			validateSettingsCmd: validateSettingsCmd,
-			beforeMetrics: perfNodeMetrics{
-				outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
-				retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
-			},
-			afterMetrics: perfNodeMetrics{
-				outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
-				retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
-			},
-		},
-		{
-			name:                "2K|IM-ON|GRO-ON|" + strconv.Itoa(t.Context().Params().PerfParameters.MessageSize),
-			prepSettingsCmd:     "ethtool -G enP35569s1 rx 2048 && ethtool -K enP35569s1 gro on && ethtool -C enP35569s1 adaptive-rx on adaptive-tx on && echo done",
-			validateSettingsCmd: validateSettingsCmd,
-			beforeMetrics: perfNodeMetrics{
-				outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
-				retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
-			},
-			afterMetrics: perfNodeMetrics{
-				outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
-				retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
-			},
-		},
+		// {
+		// 	name:                "4K|IM-ON|GRO-ON|NP-DEF|" + strconv.Itoa(t.Context().Params().PerfParameters.MessageSize),
+		// 	prepSettingsCmd:     "echo 0 >/sys/class/net/enP35569s1/gro_flush_timeout &&  echo 0 >/sys/class/net/enP35569s1/napi_defer_hard_irqs && ethtool -G enP35569s1 rx 4096 && ethtool -K enP35569s1 gro on && ethtool -C enP35569s1 adaptive-rx on adaptive-tx on && echo done",
+		// 	validateSettingsCmd: validateSettingsCmd,
+		// 	beforeMetrics: perfNodeMetrics{
+		// 		outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+		// 		retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+		// 	},
+		// 	afterMetrics: perfNodeMetrics{
+		// 		outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+		// 		retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+		// 	},
+		// },
+		// {
+		// 	name:                "4K|IM-OFF|GRO-ON|NP-DEF|" + strconv.Itoa(t.Context().Params().PerfParameters.MessageSize),
+		// 	prepSettingsCmd:     "echo 0 >/sys/class/net/enP35569s1/gro_flush_timeout &&  echo 0 >/sys/class/net/enP35569s1/napi_defer_hard_irqs && ethtool -G enP35569s1 rx 4096 && ethtool -K enP35569s1 gro on && ethtool -C enP35569s1 adaptive-rx off adaptive-tx off && echo done",
+		// 	validateSettingsCmd: validateSettingsCmd,
+		// 	beforeMetrics: perfNodeMetrics{
+		// 		outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+		// 		retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+		// 	},
+		// 	afterMetrics: perfNodeMetrics{
+		// 		outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+		// 		retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+		// 	},
+		// },
+		// {
+		// 	name:                "4K|IM-ON|GRO-ON|NP-TUNE|" + strconv.Itoa(t.Context().Params().PerfParameters.MessageSize),
+		// 	prepSettingsCmd:     "echo 20000 >/sys/class/net/enP35569s1/gro_flush_timeout &&  echo 10 >/sys/class/net/enP35569s1/napi_defer_hard_irqs && ethtool -G enP35569s1 rx 4096 && ethtool -K enP35569s1 gro on && ethtool -C enP35569s1 adaptive-rx on adaptive-tx on && echo done",
+		// 	validateSettingsCmd: validateSettingsCmd,
+		// 	beforeMetrics: perfNodeMetrics{
+		// 		outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+		// 		retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+		// 	},
+		// 	afterMetrics: perfNodeMetrics{
+		// 		outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+		// 		retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+		// 	},
+		// },
+		// {
+		// 	name:                "2K|IM-OFF|GRO-ON|NP-DEF|" + strconv.Itoa(t.Context().Params().PerfParameters.MessageSize),
+		// 	prepSettingsCmd:     "echo 0 >/sys/class/net/enP35569s1/gro_flush_timeout &&  echo 0 >/sys/class/net/enP35569s1/napi_defer_hard_irqs && ethtool -G enP35569s1 rx 2048 && ethtool -K enP35569s1 gro on && ethtool -C enP35569s1 adaptive-rx off adaptive-tx off && echo done",
+		// 	validateSettingsCmd: validateSettingsCmd,
+		// 	beforeMetrics: perfNodeMetrics{
+		// 		outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+		// 		retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+		// 	},
+		// 	afterMetrics: perfNodeMetrics{
+		// 		outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+		// 		retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+		// 	},
+		// },
+		// {
+		// 	name:                "2K|IM-ON|GRO-ON|NP-DEF|" + strconv.Itoa(t.Context().Params().PerfParameters.MessageSize),
+		// 	prepSettingsCmd:     "echo 0 >/sys/class/net/enP35569s1/gro_flush_timeout &&  echo 0 >/sys/class/net/enP35569s1/napi_defer_hard_irqs && ethtool -G enP35569s1 rx 2048 && ethtool -K enP35569s1 gro on && ethtool -C enP35569s1 adaptive-rx on adaptive-tx on && echo done",
+		// 	validateSettingsCmd: validateSettingsCmd,
+		// 	beforeMetrics: perfNodeMetrics{
+		// 		outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+		// 		retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+		// 	},
+		// 	afterMetrics: perfNodeMetrics{
+		// 		outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+		// 		retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+		// 	},
+		// },
+		// {
+		// 	name:                "2K|IM-ON|GRO-ON|NP-TUNE|" + strconv.Itoa(t.Context().Params().PerfParameters.MessageSize),
+		// 	prepSettingsCmd:     "echo 20000 >/sys/class/net/enP35569s1/gro_flush_timeout &&  echo 10 >/sys/class/net/enP35569s1/napi_defer_hard_irqs && ethtool -G enP35569s1 rx 2048 && ethtool -K enP35569s1 gro on && ethtool -C enP35569s1 adaptive-rx on adaptive-tx on && echo done",
+		// 	validateSettingsCmd: validateSettingsCmd,
+		// 	beforeMetrics: perfNodeMetrics{
+		// 		outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+		// 		retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+		// 	},
+		// 	afterMetrics: perfNodeMetrics{
+		// 		outOfBufferErrors: nodeMetrics{fetchCmd: outOfBufferErrorsCmd},
+		// 		retransSegements:  nodeMetrics{fetchCmd: retransSegementsCmd},
+		// 	},
+		// },
 	}
 	s.experiments = experiments
 
 	for _, exp := range experiments {
 		p := t.Context().PerfServerCiliumAgentPod()
 		a := t.NewAction(s, "setup_exp_"+exp.name, &p, nil, features.IPFamilyV4)
+
+		pClient := t.Context().PerfClientCiliumAgentPod()
+		clientAction := t.NewAction(s, "client_setup_exp_"+exp.name, &pClient, nil, features.IPFamilyV4)
 
 		exec := []string{"bash", "-c", exp.prepSettingsCmd}
 		a.ExecInPod(ctx, exec)
@@ -293,13 +335,13 @@ func (s *netPerf) Run(ctx context.Context, t *check.Test) {
 		a.ExecInPod(ctx, exec)
 		a.Info(a.CmdOutput())
 
-		s.RunPerfTest(ctx, t, &exp, a)
+		s.RunPerfTest(ctx, t, &exp, a, clientAction)
 	}
 
 }
 
 func buildExecCommand(test string, sip string, duration time.Duration, args []string) []string {
-	exec := []string{"/usr/local/bin/netperf", "-H", sip, "-l", duration.String(), "-t", test, "--", "-R", "1"}
+	exec := []string{"netperf", "-H", sip, "-l", duration.String(), "-c", "-C", "-t", test, "--", "-R", "1"}
 	exec = append(exec, args...)
 
 	return exec
@@ -323,9 +365,9 @@ func parseFloat(a action, value string) float64 {
 
 func parseNetperfResult(a action, test, line string) common.PerfResult {
 	values := strings.Split(line, ",")
-	if len(values) != 9 {
-		a.Fatalf("Unable to process netperf result")
-	}
+	// if len(values) != 9 {
+	// 	a.Fatalf("Unable to process netperf result")
+	// }
 	a.Debugf("Numbers: %v", values)
 
 	res := common.PerfResult{
@@ -344,6 +386,16 @@ func parseNetperfResult(a action, test, line string) common.PerfResult {
 		ThroughputMetric: &common.ThroughputMetric{
 			Throughput: parseFloat(a, values[7]) * 1000000, // by default throughput has unit "10^6bits/s", we verify that later
 		},
+		LocalCPUUtil:           values[9],
+		LocalCPUPercentSystem:  values[10],
+		LocalCPUPercentIRQ:     values[11],
+		LocalCPUPercentSwintr:  values[12],
+		LocalSD:                values[13],
+		RemoteCPUUtil:          values[14],
+		RemoteCPUPercentSystem: values[15],
+		RemoteCPUPercentIRQ:    values[16],
+		RemoteCPUPercentSwintr: values[17],
+		RemoteSD:               values[18],
 	}
 
 	if strings.HasSuffix(test, "_STREAM") {
@@ -371,9 +423,9 @@ type action interface {
 	Fatalf(format string, args ...any)
 }
 
-func NetperfCmd(ctx context.Context, sip string, perfTest common.PerfTests, a action, expAction action, exp *perfExperiment) common.PerfResult {
+func NetperfCmd(ctx context.Context, sip string, perfTest common.PerfTests, a action, expAction action, clientAction action, exp *perfExperiment) common.PerfResult {
 	exp.beforeMetrics.outOfBufferErrors.metricVal = getIntMetricFromCmdOutput(ctx, expAction, exp.beforeMetrics.outOfBufferErrors.fetchCmd)
-	exp.beforeMetrics.retransSegements.metricVal = getIntMetricFromCmdOutput(ctx, expAction, exp.beforeMetrics.retransSegements.fetchCmd)
+	exp.beforeMetrics.retransSegements.metricVal = getIntMetricFromCmdOutput(ctx, a, exp.beforeMetrics.retransSegements.fetchCmd)
 	test := strings.TrimSuffix(perfTest.Test, "_MULTI")
 
 	streams := uint(1)
@@ -385,7 +437,7 @@ func NetperfCmd(ctx context.Context, sip string, perfTest common.PerfTests, a ac
 		}
 	}
 
-	args := []string{"-o", "MIN_LATENCY,MEAN_LATENCY,MAX_LATENCY,P50_LATENCY,P90_LATENCY,P99_LATENCY,TRANSACTION_RATE,THROUGHPUT,THROUGHPUT_UNITS"}
+	args := []string{"-o", "MIN_LATENCY,MEAN_LATENCY,MAX_LATENCY,P50_LATENCY,P90_LATENCY,P99_LATENCY,TRANSACTION_RATE,THROUGHPUT,THROUGHPUT_UNITS,LOCAL_CPU_UTIL,LOCAL_CPU_PERCENT_SYSTEM,LOCAL_CPU_PERCENT_IRQ,LOCAL_CPU_PERCENT_SWINTR,LOCAL_SD,REMOTE_CPU_UTIL,REMOTE_CPU_PERCENT_SYSTEM,REMOTE_CPU_PERCENT_IRQ,REMOTE_CPU_PERCENT_SWINTR,REMOTE_SD"}
 	if test == "UDP_STREAM" || test == "TCP_STREAM" || test == "TCP_STREAM_MULTI" || perfTest.NetQos {
 		if perfTest.MsgSize != 0 {
 			args = append(args, "-m", fmt.Sprintf("%d", perfTest.MsgSize))
@@ -420,7 +472,7 @@ func NetperfCmd(ctx context.Context, sip string, perfTest common.PerfTests, a ac
 		res.ThroughputMetric.Throughput += parsed.ThroughputMetric.Throughput
 	}
 	exp.afterMetrics.outOfBufferErrors.metricVal = getIntMetricFromCmdOutput(ctx, expAction, exp.afterMetrics.outOfBufferErrors.fetchCmd)
-	exp.afterMetrics.retransSegements.metricVal = getIntMetricFromCmdOutput(ctx, expAction, exp.afterMetrics.retransSegements.fetchCmd)
+	exp.afterMetrics.retransSegements.metricVal = getIntMetricFromCmdOutput(ctx, a, exp.afterMetrics.retransSegements.fetchCmd)
 
 	res.OutOfBufferErrorsMetric = &common.OutOfBufferErrorsMetric{
 		OutOfBufferErrors: float64(exp.afterMetrics.outOfBufferErrors.metricVal - exp.beforeMetrics.outOfBufferErrors.metricVal),

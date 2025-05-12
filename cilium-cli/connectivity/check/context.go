@@ -142,6 +142,10 @@ func (ct *ConnectivityTest) PerfServerCiliumAgentPod() Pod {
 	return ct.perfServerCiliumAgent
 }
 
+func (ct *ConnectivityTest) PerfClientCiliumAgentPod() Pod {
+	return ct.perfClientCiliumAgent
+}
+
 // timestamp returns the value of the user-provided timestamp flag.
 func (ct *ConnectivityTest) timestamp() bool {
 	return ct.params.Timestamp
@@ -574,7 +578,8 @@ func (ct *ConnectivityTest) report() error {
 	if ct.params.Perf && !ct.params.PerfParameters.NetQos {
 		ct.Header(fmt.Sprintf("🔥 Network Performance Test Summary [%s]:", ct.params.TestNamespace))
 		ct.Logf("%s", strings.Repeat("-", 230))
-		ct.Logf("📋 %-15s | %-15s | %-10s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s", "Scenario", "Experiment", "Node", "Test", "Duration", "Min", "Mean", "Max", "P50", "P90", "P99", "TPS", "Retrans Segs", "Out of Buffer Errs")
+		ct.Logf("📋 %-15s | %-15s | %-10s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-30s | %-30s", 
+			"Scenario", "Experiment", "Node", "Test", "Duration", "Min", "Mean", "Max", "P50", "P90", "P99", "TPS", "Retrans Segs", "Out of Buffer Errs", "Local CPU", "Remote CPU")
 		ct.Logf("%s", strings.Repeat("-", 230))
 		nodeString := func(sameNode bool) string {
 			if sameNode {
@@ -584,7 +589,19 @@ func (ct *ConnectivityTest) report() error {
 		}
 		for _, result := range ct.PerfResults {
 			if result.Result.Latency != nil && result.Result.TransactionRateMetric != nil {
-				ct.Logf("📋 %-15s | %-15s | %-10s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-12.2f | %-14.2f | %-12.2f",
+				localCPU := fmt.Sprintf("Util:%s Sys:%s IRQ:%s SWI:%s SD:%s", 
+					result.Result.LocalCPUUtil, 
+					result.Result.LocalCPUPercentSystem, 
+					result.Result.LocalCPUPercentIRQ, 
+					result.Result.LocalCPUPercentSwintr,
+					result.Result.LocalSD)
+				remoteCPU := fmt.Sprintf("Util:%s Sys:%s IRQ:%s SWI:%s SD:%s", 
+					result.Result.RemoteCPUUtil, 
+					result.Result.RemoteCPUPercentSystem, 
+					result.Result.RemoteCPUPercentIRQ, 
+					result.Result.RemoteCPUPercentSwintr,
+					result.Result.RemoteSD)
+				ct.Logf("📋 %-15s | %-15s | %-10s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-12.2f | %-14.2f | %-12.2f | %-30s | %-30s",
 					result.PerfTest.Scenario,
 					result.PerfTest.Experiment,
 					nodeString(result.PerfTest.SameNode),
@@ -599,16 +616,31 @@ func (ct *ConnectivityTest) report() error {
 					result.Result.TransactionRateMetric.TransactionRate,
 					result.Result.RetransmitSegemntsMetric.RetransmitSegemnts,
 					result.Result.OutOfBufferErrorsMetric.OutOfBufferErrors,
+					localCPU,
+					remoteCPU,
 				)
 			}
 		}
 		ct.Logf("%s", strings.Repeat("-", 230))
 		ct.Logf("%s", strings.Repeat("-", 130))
-		ct.Logf("📋 %-15s | %-15s | %-10s | %-18s | %-15s | %-15s | %-15s | %-15s ", "Scenario", "Experiment", "Node", "Test", "Duration", "Throughput Mb/s", "Retrans Segs", "Out of Buffer Errs")
+		ct.Logf("📋 %-15s | %-15s | %-10s | %-18s | %-15s | %-15s | %-15s | %-15s | %-30s | %-30s", 
+			"Scenario", "Experiment", "Node", "Test", "Duration", "Throughput Mb/s", "Retrans Segs", "Out of Buffer Errs", "Local CPU", "Remote CPU")
 		ct.Logf("%s", strings.Repeat("-", 130))
 		for _, result := range ct.PerfResults {
 			if result.Result.ThroughputMetric != nil {
-				ct.Logf("📋 %-15s | %-15s | %-10s | %-18s | %-15s | %-15.2f | %-15.2f | %-12.2f ",
+				localCPU := fmt.Sprintf("Util:%s Sys:%s IRQ:%s SWI:%s SD:%s", 
+					result.Result.LocalCPUUtil, 
+					result.Result.LocalCPUPercentSystem, 
+					result.Result.LocalCPUPercentIRQ, 
+					result.Result.LocalCPUPercentSwintr,
+					result.Result.LocalSD)
+				remoteCPU := fmt.Sprintf("Util:%s Sys:%s IRQ:%s SWI:%s SD:%s", 
+					result.Result.RemoteCPUUtil, 
+					result.Result.RemoteCPUPercentSystem, 
+					result.Result.RemoteCPUPercentIRQ, 
+					result.Result.RemoteCPUPercentSwintr,
+					result.Result.RemoteSD)
+				ct.Logf("📋 %-15s | %-15s | %-10s | %-18s | %-15s | %-15.2f | %-15.2f | %-12.2f | %-30s | %-30s",
 					result.PerfTest.Scenario,
 					result.PerfTest.Experiment,
 					nodeString(result.PerfTest.SameNode),
@@ -617,6 +649,8 @@ func (ct *ConnectivityTest) report() error {
 					result.Result.ThroughputMetric.Throughput/1000000,
 					result.Result.RetransmitSegemntsMetric.RetransmitSegemnts,
 					result.Result.OutOfBufferErrorsMetric.OutOfBufferErrors,
+					localCPU,
+					remoteCPU,
 				)
 			}
 		}

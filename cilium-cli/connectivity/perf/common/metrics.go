@@ -132,6 +132,16 @@ type PerfResult struct {
 	ThroughputMetric         *ThroughputMetric
 	RetransmitSegemntsMetric *RetransmitSegemntsMetric
 	OutOfBufferErrorsMetric  *OutOfBufferErrorsMetric
+	LocalCPUUtil           string
+	LocalCPUPercentSystem  string
+	LocalCPUPercentIRQ     string
+	LocalCPUPercentSwintr  string
+	LocalSD                string
+	RemoteCPUUtil          string
+	RemoteCPUPercentSystem string
+	RemoteCPUPercentIRQ    string
+	RemoteCPUPercentSwintr string
+	RemoteSD               string
 }
 
 // PerfTests stores metadata information about performed test

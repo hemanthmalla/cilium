@@ -201,7 +201,7 @@ Minimum Latency Microseconds,Mean Latency Microseconds,Maximum Latency Microseco
 				Duration: duration,
 				MsgSize:  msgsize,
 				Streams:  streams,
-			}, &fakeAction{t, tt.expectedCmd, tt.output}, &fakeAction{t, tt.expectedCmd, tt.output}, &perfExperiment{}))
+			}, &fakeAction{t, tt.expectedCmd, tt.output}, &fakeAction{t, tt.expectedCmd, tt.output}, &fakeAction{t, tt.expectedCmd, tt.output}, &perfExperiment{}))
 		})
 	}
 
